@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>StJohn錄音作業</title>
+<style>
+body{font-family:-apple-system,BlinkMacSystemFont,"Noto Sans TC",sans-serif;background:#f4f7fb;margin:0;padding:18px;color:#183153}
+.card{max-width:560px;margin:auto;background:white;border-radius:18px;padding:22px;box-shadow:0 8px 28px #0001}
+h1{margin:0 0 8px}.muted{color:#667085}.box{background:#f6f8fc;border-radius:12px;padding:14px;margin:14px 0}
+select,button{width:100%;box-sizing:border-box;padding:14px;border-radius:12px;font-size:17px;margin-top:10px}
+button{border:0;background:#1677ff;color:white;font-weight:700}button.secondary{background:#eef4ff;color:#175cd3}
+button:disabled{opacity:.45}.recording{background:#e5484d!important}.ok{background:#ecfdf3;padding:12px;border-radius:10px;color:#067647;margin-top:12px}
+.err{background:#fff1f0;padding:12px;border-radius:10px;color:#b42318;margin-top:12px}audio{width:100%;margin-top:12px}
+</style>
+</head>
+<body><div class="card">
+<h1>🎙️ StJohn錄音作業</h1>
+<div id="assignment" class="box">載入作業中…</div>
+<label>選擇學生</label><select id="student"><option value="">請選擇姓名</option></select>
+<button id="record">🎤 開始錄音</button>
+<div id="timer" class="muted" style="text-align:center;margin-top:8px">00:00</div>
+<audio id="preview" controls hidden></audio>
+<button id="redo" class="secondary" hidden>重新錄音</button>
+<button id="submit" disabled>☁️ 繳交作業</button>
+<div id="msg"></div>
+</div>
+<form id="uploadForm" method="post" target="uploadFrame" style="display:none">
+<input name="assignmentId"><input name="studentId"><input name="base64"><input name="mimeType"><input name="durationSec">
+</form>
+<iframe name="uploadFrame" style="display:none"></iframe>
+<script>
+// ===== 只要改這一行：貼上 Apps Script 部署後 /exec 網址 =====
+const BACKEND_URL = 'https://script.google.com/macros/s/AKfycbwt8H7Nljgqo-zLy2CMOq0GufBC11atASA-Gv1ZOisP6S7SJN4S4li3DMlKeP_rQl7H/exec';
+
+// L5 測試資料；之後可再升級成自動同步試算表。
+const DATA = {
+  assignment:{id:'L5-W01',class:'L5',week:'Week 1',title:'Unit 1 – Reading Practice',
+  instructions:'1. Read the assigned passage.\n2. Speak clearly.\n3. Record 30–60 seconds.'},
+  students:[
+    ['L5-01','Moffy 王劭均'],['L5-02','Emi 王綵深'],['L5-03','Marcus 郭宸均'],
+    ['L5-04','Winnie 林筠宸'],['L5-05','Bonnie 黃芊瑜'],['L5-06','Kimi 呂彥儒'],['L5-07','Katie 鄭時萱']
+  ]
+};
+const a=DATA.assignment;
+document.getElementById('assignment').innerHTML=`<b>${a.class}｜${a.week}</b><h2>${a.title}</h2><div style="white-space:pre-line">${a.instructions}</div>`;
+DATA.students.forEach(s=>student.add(new Option(s[1],s[0])));
+
+let recorder,chunks=[],blob=null,start=0,tick=null,duration=0;
+const recBtn=document.getElementById('record'), preview=document.getElementById('preview'),
+submit=document.getElementById('submit'), redo=document.getElementById('redo'), msg=document.getElementById('msg');
+
+recBtn.onclick=async()=>{
+  msg.innerHTML='';
+  if(recorder && recorder.state==='recording'){ recorder.stop(); return; }
+  try{
+    if(!navigator.mediaDevices?.getUserMedia) throw new Error('此瀏覽器無法使用網頁錄音，請用 Safari 或 Chrome 開啟。');
+    const stream=await navigator.mediaDevices.getUserMedia({audio:true});
+    const preferred = MediaRecorder.isTypeSupported('audio/mp4') ? 'audio/mp4' :
+                      MediaRecorder.isTypeSupported('audio/webm;codecs=opus') ? 'audio/webm;codecs=opus' : '';
+    recorder=new MediaRecorder(stream, preferred?{mimeType:preferred}:undefined);
+    chunks=[]; start=Date.now();
+    recorder.ondataavailable=e=>{if(e.data.size)chunks.push(e.data)};
+    recorder.onstop=()=>{
+      duration=Math.round((Date.now()-start)/1000);
+      blob=new Blob(chunks,{type:recorder.mimeType||'audio/webm'});
+      preview.src=URL.createObjectURL(blob); preview.hidden=false; redo.hidden=false; submit.disabled=false;
+      recBtn.textContent='🎤 再錄一次'; recBtn.classList.remove('recording');
+      clearInterval(tick); stream.getTracks().forEach(t=>t.stop());
+    };
+    recorder.start(); recBtn.textContent='⏹ 停止錄音'; recBtn.classList.add('recording');
+    tick=setInterval(()=>{let s=Math.floor((Date.now()-start)/1000);timer.textContent=String(Math.floor(s/60)).padStart(2,'0')+':'+String(s%60).padStart(2,'0')},500);
+  }catch(e){msg.innerHTML='<div class="err">'+e.message+'</div>'}
+};
+redo.onclick=()=>recBtn.click();
+
+submit.onclick=()=>{
+  if(!student.value){msg.innerHTML='<div class="err">請先選擇學生姓名。</div>';return}
+  if(!blob){msg.innerHTML='<div class="err">請先完成錄音。</div>';return}
+  if(BACKEND_URL.startsWith('PASTE_')){msg.innerHTML='<div class="err">尚未設定 Apps Script 網址。</div>';return}
+  submit.disabled=true; submit.textContent='上傳中…';
+  const r=new FileReader();
+  r.onload=()=>{
+    const b64=String(r.result).split(',')[1];
+    const f=document.getElementById('uploadForm'); f.action=BACKEND_URL;
+    f.assignmentId.value=a.id; f.studentId.value=student.value; f.base64.value=b64;
+    f.mimeType.value=blob.type||'audio/webm'; f.durationSec.value=duration; f.submit();
+  };
+  r.readAsDataURL(blob);
+};
+window.addEventListener('message',e=>{
+  if(!e.data||e.data.type!=='stjohn-upload')return;
+  submit.disabled=false; submit.textContent='☁️ 繳交作業';
+  msg.innerHTML=e.data.ok?'<div class="ok">✅ '+e.data.message+'</div>':'<div class="err">❌ '+e.data.message+'</div>';
+});
+</script></body></html>

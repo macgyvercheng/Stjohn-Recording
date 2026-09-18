@@ -77,19 +77,56 @@ submit.onclick=()=>{
   if(!student.value){msg.innerHTML='<div class="err">請先選擇學生姓名。</div>';return}
   if(!blob){msg.innerHTML='<div class="err">請先完成錄音。</div>';return}
   if(BACKEND_URL.startsWith('PASTE_')){msg.innerHTML='<div class="err">尚未設定 Apps Script 網址。</div>';return}
-  submit.disabled=true; submit.textContent='上傳中…';
+
+  submit.disabled=true;
+  submit.textContent='上傳中…';
+  recBtn.disabled=true;
+  redo.disabled=true;
+  student.disabled=true;
+
   const r=new FileReader();
+  r.onerror=()=>{
+    submit.disabled=false;
+    submit.textContent='☁️ 重新繳交';
+    recBtn.disabled=false;
+    redo.disabled=false;
+    student.disabled=false;
+    msg.innerHTML='<div class="err">讀取錄音失敗，請再試一次。</div>';
+  };
   r.onload=()=>{
     const b64=String(r.result).split(',')[1];
-    const f=document.getElementById('uploadForm'); f.action=BACKEND_URL;
-    f.assignmentId.value=a.id; f.studentId.value=student.value; f.base64.value=b64;
-    f.mimeType.value=blob.type||'audio/webm'; f.durationSec.value=duration; f.submit();
+    const f=document.getElementById('uploadForm');
+    f.action=BACKEND_URL;
+    f.assignmentId.value=a.id;
+    f.studentId.value=student.value;
+    f.base64.value=b64;
+    f.mimeType.value=blob.type||'audio/webm';
+    f.durationSec.value=duration;
+    f.submit();
+
+    msg.innerHTML='<div class="ok">📤 錄音已送出，正在寫入作業系統…</div>';
+    setTimeout(()=>{
+      submit.textContent='✅ 已送出';
+      msg.innerHTML='<div class="ok"><b>✅ 作業已送出</b><br>請勿重複按繳交。</div>';
+    },5000);
   };
   r.readAsDataURL(blob);
 };
+
 window.addEventListener('message',e=>{
   if(!e.data||e.data.type!=='stjohn-upload')return;
-  submit.disabled=false; submit.textContent='☁️ 繳交作業';
-  msg.innerHTML=e.data.ok?'<div class="ok">✅ '+e.data.message+'</div>':'<div class="err">❌ '+e.data.message+'</div>';
+  if(e.data.ok){
+    submit.disabled=true;
+    submit.textContent='✅ 已送出';
+    msg.innerHTML='<div class="ok"><b>✅ 作業已繳交！</b><br>請勿重複繳交。</div>';
+  }else{
+    submit.disabled=false;
+    submit.textContent='☁️ 重新繳交';
+    recBtn.disabled=false;
+    redo.disabled=false;
+    student.disabled=false;
+    msg.innerHTML='<div class="err">❌ '+e.data.message+'</div>';
+  }
 });
+
 </script></body></html>

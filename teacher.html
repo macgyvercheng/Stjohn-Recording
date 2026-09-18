@@ -1,0 +1,47 @@
+<!doctype html><html lang="zh-Hant"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>StJohn Teacher</title>
+<style>body{font-family:system-ui,sans-serif;background:#f4f7fb;color:#183153;margin:0;padding:16px}.c{max-width:760px;margin:auto;background:white;padding:20px;border-radius:18px}label{display:block;font-weight:700;margin-top:12px}select,input,textarea,button{width:100%;box-sizing:border-box;padding:13px;margin-top:6px;border-radius:12px;border:1px solid #d8e0ec;font-size:16px}button{background:#3478f6;color:white;border:0;font-weight:700}.sec{background:#edf3ff;color:#2861c9}.box{border:1px solid #dde5f0;border-radius:12px;padding:12px;margin-top:10px}.muted{color:#667085}audio{width:100%;margin-top:8px}.row{display:grid;grid-template-columns:1fr 1fr;gap:10px}@media(max-width:600px){.row{grid-template-columns:1fr}}</style>
+<script src="config.js"></script></head><body><div class=c><h1>🎙️ StJohn V2.2 | Teacher Portal</h1><div id=msg class=muted>Loading…</div>
+<div class=row><div><label>老師 / Teacher</label><select id=teacher></select></div><div><label>班級 / Class</label><select id=cls></select></div></div>
+<label>週次 / Week</label><input id=week placeholder="Week 1"><label>作業標題 / Assignment Title</label><input id=title><label>作業說明 / Instructions</label><textarea id=ins rows=4></textarea><label>截止日期 / Due Date</label><input id=due type=date>
+<button onclick=createA()>建立作業 / Create Assignment</button><div id=materials style="display:none"><div class=box><b id=aid></b>
+<label>課文照片 / Reading Images</label><input id=photo type=file accept="image/*"><button class=sec onclick=upPhoto()>📷 上傳照片 / Upload Image</button>
+<label>老師示範 / Teacher Demo</label><button id=rec onclick=record()>🎤 開始錄音 / Start Recording</button><div id=timer class=muted></div><audio id=preview controls style="display:none"></audio><button id=updemo class=sec style="display:none" onclick=upDemo()>☁️ 上傳示範 / Upload Demo</button><button onclick=publishA()>✅ 發布作業 / Publish</button></div></div>
+<h2>作業 / Assignments</h2><div id=list></div></div>
+<script>
+const $=id=>document.getElementById(id);
+function nonce(){return Date.now().toString(36)+Math.random().toString(36).slice(2)}
+function jsonp(params){
+ return new Promise((resolve,reject)=>{
+  const cb='cb_'+nonce(),s=document.createElement('script');
+  const timer=setTimeout(()=>{delete window[cb];s.remove();reject(new Error('讀取逾時 / Request timeout'));},15000);
+  window[cb]=d=>{clearTimeout(timer);delete window[cb];s.remove();resolve(d)};
+  s.onerror=()=>{clearTimeout(timer);delete window[cb];s.remove();reject(new Error('無法連線後端 / Backend connection failed'))};
+  s.src=API_URL+'?'+new URLSearchParams({...params,callback:cb})+'&_='+Date.now();document.head.appendChild(s);
+ });
+}
+async function postConfirmed(data,onStatus){
+ const n=nonce(); data.nonce=n;
+ onStatus&&onStatus('上傳中… / Uploading…');
+ try{await fetch(API_URL,{method:'POST',mode:'no-cors',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:new URLSearchParams(data)});}catch(e){}
+ for(let i=0;i<12;i++){
+  await new Promise(r=>setTimeout(r,800));
+  try{const x=await jsonp({api:'confirm',nonce:n});if(!x.pending){if(x.ok)return x;throw new Error(x.error||'Operation failed');}}catch(e){if(i===11)throw e;}
+ }
+ throw new Error('後端尚未確認，請檢查 Sheet 後再重試 / Confirmation timeout');
+}
+function bestMime(){if(!window.MediaRecorder)return'';for(const m of['audio/mp4','audio/webm;codecs=opus','audio/webm','audio/ogg;codecs=opus'])if(MediaRecorder.isTypeSupported(m))return m;return''}
+function to64(blob){return new Promise((res,rej)=>{const r=new FileReader();r.onload=()=>res(String(r.result).split(',')[1]);r.onerror=rej;r.readAsDataURL(blob)})}
+
+let D={},aid='',recorder,chunks=[],blob,start,tick;
+const say=x=>$('msg').textContent=x;
+(async()=>{if(API_URL.startsWith('PASTE_'))return say('請先設定 config.js 的 API_URL');try{D=await jsonp({api:'bootstrap'});if(!D.ok)throw Error(D.error);$('teacher').innerHTML=D.teachers.map(x=>`<option value="${x.id}">${x.name}</option>`).join('');$('teacher').onchange=classes;classes();renderList();say('就緒 / Ready')}catch(e){say(e.message)}})();
+function classes(){$('cls').innerHTML=D.classes.filter(c=>c.teacherIds.includes($('teacher').value)).map(c=>`<option value="${c.id}">${c.name}</option>`).join('')}
+async function createA(){try{if(!$('teacher').value||!$('cls').value||!$('title').value.trim())throw Error('請填老師、班級、標題 / Teacher, class and title required');aid=$('cls').value+'-'+Date.now();await postConfirmed({action:'createAssignment',assignmentId:aid,teacherId:$('teacher').value,classId:$('cls').value,week:$('week').value,title:$('title').value.trim(),instructions:$('ins').value,dueDate:$('due').value},say);$('aid').textContent='Assignment ID: '+aid;$('materials').style.display='block';say('✅ 作業已建立 / Created')}catch(e){say('❌ '+e.message)}}
+async function upPhoto(){try{const f=$('photo').files[0];if(!aid||!f)throw Error('請先建立作業並選照片');const b=await to64(f);await postConfirmed({action:'uploadMedia',assignmentId:aid,mediaType:'image',mimeType:f.type||'image/jpeg',base64:b},say);say('✅ 照片已上傳 / Image uploaded')}catch(e){say('❌ '+e.message)}}
+async function record(){if(recorder&&recorder.state==='recording'){recorder.stop();return}try{const stream=await navigator.mediaDevices.getUserMedia({audio:true});chunks=[];const m=bestMime();recorder=m?new MediaRecorder(stream,{mimeType:m}):new MediaRecorder(stream);recorder.ondataavailable=e=>e.data.size&&chunks.push(e.data);recorder.onstop=()=>{blob=new Blob(chunks,{type:recorder.mimeType||'audio/webm'});$('preview').src=URL.createObjectURL(blob);$('preview').style.display='block';$('updemo').style.display='block';$('rec').textContent='🎤 重新錄音 / Record Again';clearInterval(tick);stream.getTracks().forEach(t=>t.stop())};recorder.start(250);start=Date.now();$('rec').textContent='⏹ 停止 / Stop';tick=setInterval(()=>$('timer').textContent=Math.floor((Date.now()-start)/1000)+' sec',500)}catch(e){say('❌ Microphone: '+e.message)}}
+async function upDemo(){try{if(!blob)throw Error('No recording');await postConfirmed({action:'uploadMedia',assignmentId:aid,mediaType:'demo',mimeType:blob.type,base64:await to64(blob)},say);say('✅ 示範已上傳 / Demo uploaded')}catch(e){say('❌ '+e.message)}}
+async function publishA(){try{await postConfirmed({action:'publish',assignmentId:aid},say);say('✅ 已發布 / Published');setTimeout(()=>location.reload(),700)}catch(e){say('❌ '+e.message)}}
+function renderList(){$('list').innerHTML=D.assignments.slice().reverse().map(a=>`<div class=box><b>${a.classId} | ${a.week} | ${a.title}</b><div>${a.published?'Published':'Draft'}</div><button class=sec onclick="subs('${a.id}')">查看繳交 / Submissions</button><div id="s_${a.id}"></div></div>`).join('')}
+async function subs(id){try{const d=await jsonp({api:'teacherSubmissions',assignmentId:id});$('s_'+id).innerHTML=d.rows.map(r=>`<div class=box><b>${r.name}</b> ${r.submission?`<a target=_blank href="${r.submission.audioUrl}">▶ Play</a><select id="st_${r.studentId}"><option>待批改</option><option>完成</option><option>重新錄</option></select><input id="co_${r.studentId}" value="${r.submission.comment||''}" placeholder="Teacher comment"><button onclick="review('${id}','${r.studentId}')">Save</button>`:'❌ Not Submitted'}</div>`).join('')}catch(e){say(e.message)}}
+async function review(a,s){try{await postConfirmed({action:'review',assignmentId:a,studentId:s,status:$('st_'+s).value,comment:$('co_'+s).value},say);say('✅ Review saved')}catch(e){say(e.message)}}
+</script></body></html>

@@ -1,132 +1,33 @@
-<!doctype html>
-<html lang="zh-Hant">
-<head>
-<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<title>StJohn錄音作業</title>
-<style>
-body{font-family:-apple-system,BlinkMacSystemFont,"Noto Sans TC",sans-serif;background:#f4f7fb;margin:0;padding:18px;color:#183153}
-.card{max-width:560px;margin:auto;background:white;border-radius:18px;padding:22px;box-shadow:0 8px 28px #0001}
-h1{margin:0 0 8px}.muted{color:#667085}.box{background:#f6f8fc;border-radius:12px;padding:14px;margin:14px 0}
-select,button{width:100%;box-sizing:border-box;padding:14px;border-radius:12px;font-size:17px;margin-top:10px}
-button{border:0;background:#1677ff;color:white;font-weight:700}button.secondary{background:#eef4ff;color:#175cd3}
-button:disabled{opacity:.45}.recording{background:#e5484d!important}.ok{background:#ecfdf3;padding:12px;border-radius:10px;color:#067647;margin-top:12px}
-.err{background:#fff1f0;padding:12px;border-radius:10px;color:#b42318;margin-top:12px}audio{width:100%;margin-top:12px}
-</style>
-</head>
-<body><div class="card">
-<h1>🎙️ StJohn錄音作業</h1>
-<div id="assignment" class="box">載入作業中…</div>
-<label>選擇學生</label><select id="student"><option value="">請選擇姓名</option></select>
-<button id="record">🎤 開始錄音</button>
-<div id="timer" class="muted" style="text-align:center;margin-top:8px">00:00</div>
-<audio id="preview" controls hidden></audio>
-<button id="redo" class="secondary" hidden>重新錄音</button>
-<button id="submit" disabled>☁️ 繳交作業</button>
-<div id="msg"></div>
-</div>
-<form id="uploadForm" method="post" target="uploadFrame" style="display:none">
-<input name="assignmentId"><input name="studentId"><input name="base64"><input name="mimeType"><input name="durationSec">
-</form>
-<iframe name="uploadFrame" style="display:none"></iframe>
-<script>
-// ===== 只要改這一行：貼上 Apps Script 部署後 /exec 網址 =====
-const BACKEND_URL = 'https://script.google.com/macros/s/AKfycbwt8H7Nljgqo-zLy2CMOq0GufBC11atASA-Gv1ZOisP6S7SJN4S4li3DMlKeP_rQl7H/exec';
+<!doctype html><html lang="zh-Hant"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>StJohn Recording</title>
+<style>body{font-family:system-ui,sans-serif;background:#f4f7fb;color:#183153;margin:0;padding:16px}.c{max-width:650px;margin:auto;background:#fff;padding:20px;border-radius:18px}select,button{width:100%;box-sizing:border-box;padding:14px;margin-top:10px;border-radius:12px;border:1px solid #d7deea;font-size:17px}button{background:#3478f6;color:#fff;border:0;font-weight:700}.sec{background:#edf3ff;color:#2861c9}.box{background:#f6f8fc;padding:15px;border-radius:14px;margin-top:14px}.muted{color:#667085}.page{width:100%;border-radius:10px;margin-top:10px}audio{width:100%;margin-top:10px}</style><script src="config.js"></script></head><body><div class=c><h1>🎙️ StJohn錄音作業</h1><div id=msg class=muted>Loading…</div><label>班級 / Class</label><select id=cls></select><label>學生 / Student</label><select id=student></select><label>作業 / Assignment</label><select id=assignment></select><div id=work></div></div><script>
+const $=id=>document.getElementById(id);
+function nonce(){return Date.now().toString(36)+Math.random().toString(36).slice(2)}
+function jsonp(params){
+ return new Promise((resolve,reject)=>{
+  const cb='cb_'+nonce(),s=document.createElement('script');
+  const timer=setTimeout(()=>{delete window[cb];s.remove();reject(new Error('讀取逾時 / Request timeout'));},15000);
+  window[cb]=d=>{clearTimeout(timer);delete window[cb];s.remove();resolve(d)};
+  s.onerror=()=>{clearTimeout(timer);delete window[cb];s.remove();reject(new Error('無法連線後端 / Backend connection failed'))};
+  s.src=API_URL+'?'+new URLSearchParams({...params,callback:cb})+'&_='+Date.now();document.head.appendChild(s);
+ });
+}
+async function postConfirmed(data,onStatus){
+ const n=nonce(); data.nonce=n;
+ onStatus&&onStatus('上傳中… / Uploading…');
+ try{await fetch(API_URL,{method:'POST',mode:'no-cors',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:new URLSearchParams(data)});}catch(e){}
+ for(let i=0;i<12;i++){
+  await new Promise(r=>setTimeout(r,800));
+  try{const x=await jsonp({api:'confirm',nonce:n});if(!x.pending){if(x.ok)return x;throw new Error(x.error||'Operation failed');}}catch(e){if(i===11)throw e;}
+ }
+ throw new Error('後端尚未確認，請檢查 Sheet 後再重試 / Confirmation timeout');
+}
+function bestMime(){if(!window.MediaRecorder)return'';for(const m of['audio/mp4','audio/webm;codecs=opus','audio/webm','audio/ogg;codecs=opus'])if(MediaRecorder.isTypeSupported(m))return m;return''}
+function to64(blob){return new Promise((res,rej)=>{const r=new FileReader();r.onload=()=>res(String(r.result).split(',')[1]);r.onerror=rej;r.readAsDataURL(blob)})}
 
-// L5 測試資料；之後可再升級成自動同步試算表。
-const DATA = {
-  assignment:{id:'L5-W01',class:'L5',week:'Week 1',title:'Unit 1 – Reading Practice',
-  instructions:'1. Read the assigned passage.\n2. Speak clearly.\n3. Record 30–60 seconds.'},
-  students:[
-    ['L5-01','Moffy 王劭均'],['L5-02','Emi 王綵深'],['L5-03','Marcus 郭宸均'],
-    ['L5-04','Winnie 林筠宸'],['L5-05','Bonnie 黃芊瑜'],['L5-06','Kimi 呂彥儒'],['L5-07','Katie 鄭時萱']
-  ]
-};
-const a=DATA.assignment;
-document.getElementById('assignment').innerHTML=`<b>${a.class}｜${a.week}</b><h2>${a.title}</h2><div style="white-space:pre-line">${a.instructions}</div>`;
-DATA.students.forEach(s=>student.add(new Option(s[1],s[0])));
-
-let recorder,chunks=[],blob=null,start=0,tick=null,duration=0;
-const recBtn=document.getElementById('record'), preview=document.getElementById('preview'),
-submit=document.getElementById('submit'), redo=document.getElementById('redo'), msg=document.getElementById('msg');
-
-recBtn.onclick=async()=>{
-  msg.innerHTML='';
-  if(recorder && recorder.state==='recording'){ recorder.stop(); return; }
-  try{
-    if(!navigator.mediaDevices?.getUserMedia) throw new Error('此瀏覽器無法使用網頁錄音，請用 Safari 或 Chrome 開啟。');
-    const stream=await navigator.mediaDevices.getUserMedia({audio:true});
-    const preferred = MediaRecorder.isTypeSupported('audio/mp4') ? 'audio/mp4' :
-                      MediaRecorder.isTypeSupported('audio/webm;codecs=opus') ? 'audio/webm;codecs=opus' : '';
-    recorder=new MediaRecorder(stream, preferred?{mimeType:preferred}:undefined);
-    chunks=[]; start=Date.now();
-    recorder.ondataavailable=e=>{if(e.data.size)chunks.push(e.data)};
-    recorder.onstop=()=>{
-      duration=Math.round((Date.now()-start)/1000);
-      blob=new Blob(chunks,{type:recorder.mimeType||'audio/webm'});
-      preview.src=URL.createObjectURL(blob); preview.hidden=false; redo.hidden=false; submit.disabled=false;
-      recBtn.textContent='🎤 再錄一次'; recBtn.classList.remove('recording');
-      clearInterval(tick); stream.getTracks().forEach(t=>t.stop());
-    };
-    recorder.start(); recBtn.textContent='⏹ 停止錄音'; recBtn.classList.add('recording');
-    tick=setInterval(()=>{let s=Math.floor((Date.now()-start)/1000);timer.textContent=String(Math.floor(s/60)).padStart(2,'0')+':'+String(s%60).padStart(2,'0')},500);
-  }catch(e){msg.innerHTML='<div class="err">'+e.message+'</div>'}
-};
-redo.onclick=()=>recBtn.click();
-
-submit.onclick=()=>{
-  if(!student.value){msg.innerHTML='<div class="err">請先選擇學生姓名。</div>';return}
-  if(!blob){msg.innerHTML='<div class="err">請先完成錄音。</div>';return}
-  if(BACKEND_URL.startsWith('PASTE_')){msg.innerHTML='<div class="err">尚未設定 Apps Script 網址。</div>';return}
-
-  submit.disabled=true;
-  submit.textContent='上傳中…';
-  recBtn.disabled=true;
-  redo.disabled=true;
-  student.disabled=true;
-
-  const r=new FileReader();
-  r.onerror=()=>{
-    submit.disabled=false;
-    submit.textContent='☁️ 重新繳交';
-    recBtn.disabled=false;
-    redo.disabled=false;
-    student.disabled=false;
-    msg.innerHTML='<div class="err">讀取錄音失敗，請再試一次。</div>';
-  };
-  r.onload=()=>{
-    const b64=String(r.result).split(',')[1];
-    const f=document.getElementById('uploadForm');
-    f.action=BACKEND_URL;
-    f.assignmentId.value=a.id;
-    f.studentId.value=student.value;
-    f.base64.value=b64;
-    f.mimeType.value=blob.type||'audio/webm';
-    f.durationSec.value=duration;
-    f.submit();
-
-    msg.innerHTML='<div class="ok">📤 錄音已送出，正在寫入作業系統…</div>';
-    setTimeout(()=>{
-      submit.textContent='✅ 已送出';
-      msg.innerHTML='<div class="ok"><b>✅ 作業已送出</b><br>請勿重複按繳交。</div>';
-    },5000);
-  };
-  r.readAsDataURL(blob);
-};
-
-window.addEventListener('message',e=>{
-  if(!e.data||e.data.type!=='stjohn-upload')return;
-  if(e.data.ok){
-    submit.disabled=true;
-    submit.textContent='✅ 已送出';
-    msg.innerHTML='<div class="ok"><b>✅ 作業已繳交！</b><br>請勿重複繳交。</div>';
-  }else{
-    submit.disabled=false;
-    submit.textContent='☁️ 重新繳交';
-    recBtn.disabled=false;
-    redo.disabled=false;
-    student.disabled=false;
-    msg.innerHTML='<div class="err">❌ '+e.data.message+'</div>';
-  }
-});
-
+let D={},recorder,chunks=[],blob,start,tick,duration=0;const say=x=>$('msg').textContent=x;
+(async()=>{if(API_URL.startsWith('PASTE_'))return say('請先設定 config.js');try{D=await jsonp({api:'bootstrap'});$('cls').innerHTML=D.classes.map(x=>`<option value="${x.id}">${x.name}</option>`).join('');$('cls').onchange=refresh;$('assignment').onchange=render;refresh();say('就緒 / Ready')}catch(e){say(e.message)}})();
+function refresh(){const c=$('cls').value;$('student').innerHTML=D.students.filter(x=>x.classId===c).map(x=>`<option value="${x.id}">${x.name}</option>`).join('');$('assignment').innerHTML=D.assignments.filter(x=>x.classId===c&&x.published).map(x=>`<option value="${x.id}">${x.week} ${x.title}</option>`).join('');render()}
+async function render(){const id=$('assignment').value;if(!id){$('work').innerHTML='<div class=box>目前沒有已發布作業 / No published assignment.</div>';return}try{const d=await jsonp({api:'assignment',assignmentId:id}),a=d.assignment,imgs=d.media.filter(x=>x.type==='image').sort((a,b)=>a.sort-b),demo=d.media.filter(x=>x.type==='demo').slice(-1)[0];$('work').innerHTML=`<div class=box><h2>${a.title}</h2><div style="white-space:pre-line">${a.instructions}</div>${imgs.map(x=>`<img class=page src="${x.url}">`).join('')}${demo?`<h3>老師示範 / Teacher Demo</h3><audio controls src="${demo.url}"></audio>`:''}<h3>我的錄音 / My Recording</h3><button id=rec onclick=record()>🎤 開始錄音 / Start Recording</button><div id=timer class=muted></div><audio id=preview controls style="display:none"></audio><button id=redo class=sec style="display:none" onclick=record()>重新錄音 / Record Again</button><button id=submit style="display:none" onclick=submitR()>繳交 / Submit</button><div id=status></div></div>`}catch(e){say(e.message)}}
+async function record(){if(recorder&&recorder.state==='recording'){recorder.stop();return}try{const stream=await navigator.mediaDevices.getUserMedia({audio:true});chunks=[];const m=bestMime();recorder=m?new MediaRecorder(stream,{mimeType:m}):new MediaRecorder(stream);recorder.ondataavailable=e=>e.data.size&&chunks.push(e.data);recorder.onstop=()=>{duration=Math.max(1,Math.round((Date.now()-start)/1000));blob=new Blob(chunks,{type:recorder.mimeType||'audio/webm'});$('preview').src=URL.createObjectURL(blob);$('preview').style.display='block';$('redo').style.display='block';$('submit').style.display='block';$('rec').textContent='🎤 再錄一次 / Record Again';clearInterval(tick);stream.getTracks().forEach(t=>t.stop())};recorder.start(250);start=Date.now();$('rec').textContent='⏹ 停止 / Stop';tick=setInterval(()=>$('timer').textContent=Math.floor((Date.now()-start)/1000)+' sec',500)}catch(e){$('status').textContent='❌ Microphone: '+e.message}}
+async function submitR(){try{if(!blob)throw Error('No recording');$('submit').disabled=true;await postConfirmed({action:'submitRecording',assignmentId:$('assignment').value,studentId:$('student').value,mimeType:blob.type,durationSec:duration,base64:await to64(blob)},x=>$('status').textContent=x);$('submit').textContent='✅ 已繳交 / Submitted';$('status').textContent='作業已成功繳交 / Submission confirmed'}catch(e){$('submit').disabled=false;$('status').textContent='❌ '+e.message}}
 </script></body></html>

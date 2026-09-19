@@ -54,8 +54,21 @@ async function upPhoto(){const st=$('photoStatus'),bt=$('photoBtn');try{const f=
 async function record(){if(recorder&&recorder.state==='recording'){recorder.stop();return}try{const stream=await navigator.mediaDevices.getUserMedia({audio:true});chunks=[];const m=bestMime();recorder=m?new MediaRecorder(stream,{mimeType:m}):new MediaRecorder(stream);recorder.ondataavailable=e=>e.data.size&&chunks.push(e.data);recorder.onstop=()=>{blob=new Blob(chunks,{type:recorder.mimeType||'audio/webm'});$('preview').src=URL.createObjectURL(blob);$('preview').style.display='block';$('updemo').style.display='block';$('rec').textContent='🎤 重新錄音 / Record Again';clearInterval(tick);stream.getTracks().forEach(t=>t.stop())};recorder.start(250);start=Date.now();$('rec').textContent='⏹ 停止 / Stop';tick=setInterval(()=>$('timer').textContent=Math.floor((Date.now()-start)/1000)+' sec',500)}catch(e){say('❌ Microphone: '+e.message)}}
 async function upDemo(){const st=$('demoStatus'),bt=$('updemo');try{if(!blob)throw Error('No recording');bt.disabled=true;st.textContent='⏳ 上傳中… / Uploading…';await postConfirmed({action:'uploadMedia',token:AUTH,assignmentId:aid,mediaType:'demo',mimeType:blob.type,base64:await to64(blob)},x=>st.textContent=x);st.textContent='✅ 示範已上傳 / Demo uploaded'}catch(e){st.textContent='❌ '+e.message}finally{bt.disabled=false}}
 async function publishA(){try{await postConfirmed({action:'publish',token:AUTH,assignmentId:aid},say);say('✅ 已發布 / Published');setTimeout(()=>location.reload(),700)}catch(e){say('❌ '+e.message)}}
-function renderList(){let arr=D.assignments;if(SESSION.role!=='admin')arr=arr.filter(a=>SESSION.classes.includes(a.classId));$('list').innerHTML=arr.slice().reverse().map(a=>`<div class=box><b>${a.classId} | ${a.week} | ${a.title}</b><div>${a.published?'Published':'Draft'}</div><button class=sec onclick="subs('${a.id}')">查看繳交 / Submissions</button><div id="s_${a.id}"></div></div>`).join('')}
+function renderList(){let arr=D.assignments;if(SESSION.role!=='admin')arr=arr.filter(a=>SESSION.classes.includes(a.classId));$('list').innerHTML=arr.slice().reverse().map(a=>`<div class=box><b>${a.classId} | ${a.week} | ${a.title}</b><div>${a.published?'Published':'Draft'}</div><button class=sec onclick="subs('${a.id}')">查看繳交 / Submissions</button>${SESSION.role==='admin'?`<button style="background:#b42318" onclick="deleteA('${a.id}',${JSON.stringify(a.title)})">🗑 刪除作業 / Delete Assignment</button><div id="del_${a.id}" class="muted"></div>`:''}<div id="s_${a.id}"></div></div>`).join('')}
 async function subs(id){try{const d=await jsonp({api:'teacherSubmissions',assignmentId:id});$('s_'+id).innerHTML=d.rows.map(r=>`<div class=box><b>${r.name}</b> ${r.submission?`<a target=_blank href="${r.submission.audioUrl}">▶ Play</a><select id="st_${r.studentId}"><option>待批改</option><option>完成</option><option>重新錄</option></select><input id="co_${r.studentId}" value="${r.submission.comment||''}" placeholder="Teacher comment"><button id="rvb_${r.studentId}" onclick="review('${id}','${r.studentId}')">Save</button><div id="rvs_${r.studentId}" class="muted"></div>`:'❌ Not Submitted'}</div>`).join('')}catch(e){say(e.message)}}
 async function review(a,s){const st=$('rvs_'+s),bt=$('rvb_'+s);try{bt.disabled=true;st.textContent='⏳ 儲存中… / Saving…';await postConfirmed({action:'review',token:AUTH,assignmentId:a,studentId:s,status:$('st_'+s).value,comment:$('co_'+s).value},x=>st.textContent=x);st.textContent='✅ 評語已儲存 / Feedback Saved'}catch(e){st.textContent='❌ '+e.message}finally{bt.disabled=false}}
+async function deleteA(id,title){
+ if(!SESSION||SESSION.role!=='admin')return;
+ const ok=confirm(`⚠️ 確定刪除「${title}」？\n\n將刪除這份作業、教材資料、學生繳交紀錄，相關 Drive 檔案會移到垃圾桶。\n\nDelete this assignment and related files/submissions?`);
+ if(!ok)return;
+ const st=$('del_'+id);
+ try{
+   st.textContent='⏳ 刪除中… / Deleting…';
+   await postConfirmed({action:'deleteAssignment',token:AUTH,assignmentId:id},x=>st.textContent=x);
+   st.textContent='✅ 已刪除 / Deleted';
+   D.assignments=D.assignments.filter(a=>a.id!==id);
+   setTimeout(renderList,600);
+ }catch(e){st.textContent='❌ '+e.message}
+}
 restore();
 </script></body></html>

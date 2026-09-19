@@ -1,74 +1,49 @@
-<!doctype html><html lang="zh-Hant"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>StJohn Recording</title>
-<style>body{font-family:system-ui,sans-serif;background:#f4f7fb;color:#183153;margin:0;padding:16px}.c{max-width:650px;margin:auto;background:#fff;padding:20px;border-radius:18px}select,button{width:100%;box-sizing:border-box;padding:14px;margin-top:10px;border-radius:12px;border:1px solid #d7deea;font-size:17px}button{background:#3478f6;color:#fff;border:0;font-weight:700}.sec{background:#edf3ff;color:#2861c9}.box{background:#f6f8fc;padding:15px;border-radius:14px;margin-top:14px}.muted{color:#667085}.page{width:100%;border-radius:10px;margin-top:10px}audio{width:100%;margin-top:10px}</style><script src="config.js"></script></head><body><div class=c><h1>🎙️ StJohn錄音作業</h1><div id=msg class=muted>Loading…</div><label>班級 / Class</label><select id=cls></select><label>學生 / Student</label><select id=student></select><label>作業 / Assignment</label><select id=assignment></select><div id=work></div></div><script>
-const $=id=>document.getElementById(id);
-function nonce(){return Date.now().toString(36)+Math.random().toString(36).slice(2)}
-function jsonp(params){
- return new Promise((resolve,reject)=>{
-  const cb='cb_'+nonce(),s=document.createElement('script');
-  const timer=setTimeout(()=>{delete window[cb];s.remove();reject(new Error('讀取逾時 / Request timeout'));},15000);
-  window[cb]=d=>{clearTimeout(timer);delete window[cb];s.remove();resolve(d)};
-  s.onerror=()=>{clearTimeout(timer);delete window[cb];s.remove();reject(new Error('無法連線後端 / Backend connection failed'))};
-  s.src=API_URL+'?'+new URLSearchParams({...params,callback:cb})+'&_='+Date.now();document.head.appendChild(s);
- });
-}
-async function postConfirmed(data,onStatus){
- const n=nonce(); data.nonce=n;
- onStatus&&onStatus('上傳中… / Uploading…');
- try{await fetch(API_URL,{method:'POST',mode:'no-cors',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:new URLSearchParams(data)});}catch(e){}
- for(let i=0;i<12;i++){
-  await new Promise(r=>setTimeout(r,800));
-  try{const x=await jsonp({api:'confirm',nonce:n});if(!x.pending){if(x.ok)return x;throw new Error(x.error||'Operation failed');}}catch(e){if(i===11)throw e;}
- }
- throw new Error('後端尚未確認，請檢查 Sheet 後再重試 / Confirmation timeout');
-}
-function bestMime(){if(!window.MediaRecorder)return'';for(const m of['audio/mp4','audio/webm;codecs=opus','audio/webm','audio/ogg;codecs=opus'])if(MediaRecorder.isTypeSupported(m))return m;return''}
-function to64(blob){return new Promise((res,rej)=>{const r=new FileReader();r.onload=()=>res(String(r.result).split(',')[1]);r.onerror=rej;r.readAsDataURL(blob)})}
+<!doctype html><html lang="zh-Hant"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>StJohn 錄音作業</title>
+<style>
+body{font-family:system-ui,-apple-system,sans-serif;background:#f4f7fb;color:#183153;margin:0;padding:16px}
+.c{max-width:760px;margin:auto;background:#fff;padding:20px;border-radius:18px}
+.login{max-width:480px;margin:8vh auto}
+h1{margin-top:0} label{display:block;font-weight:700;margin-top:14px}
+select,input,button{width:100%;box-sizing:border-box;padding:13px;margin-top:6px;border-radius:12px;border:1px solid #d8e0ec;font-size:16px}
+button{background:#3478f6;color:#fff;border:0;font-weight:700}.sec{background:#edf3ff;color:#2861c9}
+.box{border:1px solid #dde5f0;border-radius:14px;padding:14px;margin-top:12px}.muted{color:#667085}.badge{background:#edf3ff;padding:6px 10px;border-radius:999px;display:inline-block}
+img{max-width:100%;border-radius:10px;margin-top:8px}audio{width:100%;margin-top:8px}.feedback{background:#fff8e6;border:1px solid #f2d58a;border-radius:14px;padding:14px;margin:12px 0}
+.brand{text-align:center;margin-bottom:18px}.brand-logo{width:min(100%,420px);height:auto;display:block;margin:0 auto 8px}.mascot{width:105px;height:auto;display:block;margin:0 auto 8px}.welcome{text-align:center;margin:2px 0 14px}.welcome h2{margin:4px 0}.welcome .muted{font-size:14px}
+#pick{position:relative;overflow:hidden}#pick:after{content:"";position:absolute;right:-28px;bottom:-24px;width:145px;height:145px;background:url('stjohn-mascot.jpg') center/contain no-repeat;opacity:.08;pointer-events:none}
+.student-head{display:flex;align-items:center;gap:12px;margin-bottom:14px;padding-bottom:12px;border-bottom:1px solid #e7edf6}.student-head img{width:76px;margin:0}.student-head .title{font-size:22px;font-weight:800}.assignment-title{display:flex;align-items:center;gap:8px}.assignment-title:before{content:"📘"}
+</style><script src="config.js"></script></head><body>
+<div id=pick class="c login"><div class=brand><img class=brand-logo src="stjohn-logo.jpg" alt="St. John American School"><img class=mascot src="stjohn-mascot.jpg" alt=""></div><div class=welcome><h2>🎙️ 錄音作業 / Recording Homework</h2><div class=muted>學生登入 / Student Login</div></div>
+<label>班級 / Class</label><select id=cls onchange=students()></select>
+<label>姓名 / Name</label><select id=student></select>
+<button onclick=enter()>進入作業 / Enter Assignments</button><div id=pickMsg class=muted></div></div>
 
-let D={},recorder,chunks=[],blob,start,tick,duration=0;const say=x=>$('msg').textContent=x;
-(async()=>{if(API_URL.startsWith('PASTE_'))return say('請先設定 config.js');try{D=await jsonp({api:'bootstrap'});$('cls').innerHTML=D.classes.map(x=>`<option value="${x.id}">${x.name}</option>`).join('');$('cls').onchange=refresh;$('student').onchange=render;$('assignment').onchange=render;refresh();say('就緒 / Ready')}catch(e){say(e.message)}})();
-function refresh(){const c=$('cls').value;$('student').innerHTML=D.students.filter(x=>x.classId===c).map(x=>`<option value="${x.id}">${x.name}</option>`).join('');$('assignment').innerHTML=D.assignments.filter(x=>x.classId===c&&x.published).map(x=>`<option value="${x.id}">${x.week} ${x.title}</option>`).join('');render()}
-async function mediaSrc(fileId){
- const d=await jsonp({api:'media',fileId});
- if(!d.ok)throw Error(d.error||'Media load failed');
- return `data:${d.mimeType};base64,${d.base64}`;
-}
-async function render(){
- const id=$('assignment').value;
- if(!id){$('work').innerHTML='<div class=box>目前沒有已發布作業 / No published assignment.</div>';return}
- try{
-  const d=await jsonp({api:'assignment',assignmentId:id}),a=d.assignment,
-        imgs=d.media.filter(x=>x.type==='image').sort((a,b)=>a.sort-b),
-        demo=d.media.filter(x=>x.type==='demo').slice(-1)[0];
-  $('work').innerHTML=`<div id=feedbackArea></div><div class=box><h2>${a.title}</h2>
-   <div style="white-space:pre-line">${a.instructions}</div>
-   <div id=mediaArea>${imgs.length?'<div class=muted>教材圖片載入中… / Loading images…</div>':''}</div>
-   ${demo?`<h3>老師示範 / Teacher Demo</h3><div id=demoArea class=muted>示範錄音載入中… / Loading demo…</div>`:''}
-   <h3>我的錄音 / My Recording</h3>
-   <button id=rec onclick=record()>🎤 開始錄音 / Start Recording</button>
-   <div id=timer class=muted></div><audio id=preview controls style="display:none"></audio>
-   <button id=redo class=sec style="display:none" onclick=record()>重新錄音 / Record Again</button>
-   <button id=submit style="display:none" onclick=submitR()>繳交 / Submit</button><div id=status></div></div>`;
-  try{
-    const fb=await jsonp({api:'studentFeedback',studentId:$('student').value,assignmentId:id});
-    if(fb.feedback){
-      const f=fb.feedback;
-      $('feedbackArea').innerHTML=`<div class=box><h3>📝 上次老師的評語 / Previous Teacher Feedback</h3>
-      <b>${f.week?f.week+' · ':''}${f.assignmentTitle||'Previous Assignment'}</b>
-      <div style="white-space:pre-line;margin-top:8px">${f.comment}</div>
-      <div class=muted style="margin-top:8px">${f.status||''}${f.reviewedAt?' · '+f.reviewedAt:''}</div></div>`;
-    }
-  }catch(e){}
-  const ma=$('mediaArea'); if(ma)ma.innerHTML='';
-  for(const x of imgs){
-    try{const src=await mediaSrc(x.fileId);const im=document.createElement('img');im.className='page';im.src=src;ma.appendChild(im)}
-    catch(e){const p=document.createElement('div');p.textContent='❌ 圖片載入失敗 / Image failed';ma.appendChild(p)}
-  }
-  if(demo){
-    try{const src=await mediaSrc(demo.fileId);$('demoArea').innerHTML='';const au=document.createElement('audio');au.controls=true;au.src=src;$('demoArea').appendChild(au)}
-    catch(e){$('demoArea').textContent='❌ 示範錄音載入失敗 / Demo failed'}
-  }
- }catch(e){say('❌ '+e.message)}
-}
-async function record(){if(recorder&&recorder.state==='recording'){recorder.stop();return}try{const stream=await navigator.mediaDevices.getUserMedia({audio:true});chunks=[];const m=bestMime();recorder=m?new MediaRecorder(stream,{mimeType:m}):new MediaRecorder(stream);recorder.ondataavailable=e=>e.data.size&&chunks.push(e.data);recorder.onstop=()=>{duration=Math.max(1,Math.round((Date.now()-start)/1000));blob=new Blob(chunks,{type:recorder.mimeType||'audio/webm'});$('preview').src=URL.createObjectURL(blob);$('preview').style.display='block';$('redo').style.display='block';$('submit').style.display='block';$('rec').textContent='🎤 再錄一次 / Record Again';clearInterval(tick);stream.getTracks().forEach(t=>t.stop())};recorder.start(250);start=Date.now();$('rec').textContent='⏹ 停止 / Stop';tick=setInterval(()=>$('timer').textContent=Math.floor((Date.now()-start)/1000)+' sec',500)}catch(e){$('status').textContent='❌ Microphone: '+e.message}}
-async function submitR(){try{if(!blob)throw Error('No recording');const b=$('submit');b.disabled=true;b.textContent='⏳ 繳交中… / Submitting…';$('status').textContent='';await postConfirmed({action:'submitRecording',assignmentId:$('assignment').value,studentId:$('student').value,mimeType:blob.type,durationSec:duration,base64:await to64(blob)},x=>$('status').textContent=x);b.textContent='✅ 已繳交 / Submitted';$('status').textContent='✅ 作業已成功繳交 / Submission confirmed'}catch(e){$('submit').disabled=false;$('submit').textContent='繳交 / Submit';$('status').textContent='❌ '+e.message}}
+<div id=home class=c style="display:none">
+<div class=student-head><img src="stjohn-mascot.jpg" alt=""><div><div class=title>StJohn 錄音作業</div><div class=muted>Recording Homework</div></div></div>
+<div><span id=who class=badge></span> <button class=sec style="width:auto;padding:7px 12px" onclick=back()>更換學生 / Change Student</button></div>
+<div id=feedback></div>
+<h2>作業清單 / Assignments</h2><div id=list></div>
+<div id=detail style="display:none"></div>
+</div>
+
+<script>
+const $=id=>document.getElementById(id); let D={},ME=null,mediaCache={};
+function jsonp(params){return new Promise((resolve,reject)=>{const cb='cb_'+Date.now()+'_'+Math.floor(Math.random()*9999),s=document.createElement('script');window[cb]=d=>{delete window[cb];s.remove();d&&d.ok===false?reject(Error(d.error||'Error')):resolve(d)};s.onerror=()=>{delete window[cb];s.remove();reject(Error('Network error'))};params.callback=cb;s.src=API_URL+'?'+new URLSearchParams(params);document.body.appendChild(s)})}
+async function init(){try{D=await jsonp({api:'bootstrap'});$('cls').innerHTML=D.classes.map(c=>`<option value="${c.id}">${c.name}</option>`).join('');students()}catch(e){$('pickMsg').textContent='❌ '+e.message}}
+function students(){const c=$('cls').value;$('student').innerHTML=D.students.filter(s=>s.classId===c).map(s=>`<option value="${s.id}">${s.name}</option>`).join('')}
+async function enter(){const id=$('student').value;ME=D.students.find(s=>s.id===id);if(!ME)return;$('pick').style.display='none';$('home').style.display='block';$('who').textContent=ME.classId+' | '+ME.name;await loadFeedback();renderList()}
+function back(){ME=null;$('home').style.display='none';$('detail').style.display='none';$('pick').style.display='block'}
+async function loadFeedback(){const box=$('feedback');try{const r=await jsonp({api:'studentFeedback',studentId:ME.id,assignmentId:''});if(r.feedback){const f=r.feedback;box.innerHTML=`<div class=feedback><b>📝 上次老師的評語 / Previous Teacher Feedback</b><div style="margin-top:8px">${f.week?f.week+' | ':''}${f.title||''}</div><div><b>${f.status||''}</b></div><div style="margin-top:6px">${f.comment||''}</div></div>`}else box.innerHTML=''}catch(e){box.innerHTML=''}}
+function renderList(){const arr=D.assignments.filter(a=>a.classId===ME.classId&&a.published);$('list').innerHTML=arr.length?arr.slice().reverse().map(a=>`<div class=box><b class=assignment-title>${fmtDate(a.week)} | ${a.title}</b><div class=muted>${a.instructions||''}</div><button class=sec onclick="openA('${a.id}')">查看作業 / Open Assignment</button></div>`).join(''):'<div class=muted>目前沒有作業 / No assignments yet.</div>'}
+function fmtDate(v){if(!v)return'';const d=new Date(v);if(!isNaN(d))return d.toLocaleDateString('zh-TW');return v}
+async function openA(id){const a=D.assignments.find(x=>x.id===id),box=$('detail');box.style.display='block';box.innerHTML='<div class=box>⏳ 載入作業… / Loading…</div>';try{const r=await jsonp({api:'assignment',assignmentId:id});let media='';for(const m of (r.media||[])){if(m.mediaType==='image')media+=`<div id="m_${m.fileId}">⏳ Loading image…</div>`;if(m.mediaType==='demo')media+=`<div id="m_${m.fileId}">⏳ Loading demo…</div>`}box.innerHTML=`<div class=box><button class=sec onclick="closeA()">← 返回作業清單 / Back</button><h2>${a.title}</h2><div>${a.instructions||''}</div>${media}<hr><b>學生錄音 / Student Recording</b><button id=rec onclick="record()">🎤 開始錄音 / Start Recording</button><div id=timer class=muted></div><audio id=preview controls style="display:none"></audio><button id=submit style="display:none" onclick="submitRec('${id}')">☁️ 繳交錄音 / Submit Recording</button><div id=submitStatus class=muted></div></div>`;for(const m of (r.media||[]))loadMedia(m)}catch(e){box.innerHTML='<div class=box>❌ '+e.message+'</div>'}box.scrollIntoView({behavior:'smooth'})}
+function closeA(){$('detail').style.display='none';$('detail').innerHTML='';$('list').scrollIntoView({behavior:'smooth'})}
+async function loadMedia(m){try{const d=await jsonp({api:'media',fileId:m.fileId}),src='data:'+(d.mimeType||'application/octet-stream')+';base64,'+d.base64,el=$('m_'+m.fileId);if(m.mediaType==='image')el.innerHTML=`<img src="${src}">`;else el.innerHTML=`<div><b>🔊 老師示範 / Teacher Demo</b><audio controls src="${src}"></audio></div>`}catch(e){const el=$('m_'+m.fileId);if(el)el.textContent='❌ Media error'}}
+let recorder,chunks=[],blob,start,tick;
+function bestMime(){const a=['audio/mp4','audio/webm;codecs=opus','audio/webm'];return a.find(x=>window.MediaRecorder&&MediaRecorder.isTypeSupported&&MediaRecorder.isTypeSupported(x))||''}
+async function record(){if(recorder&&recorder.state==='recording'){recorder.stop();return}try{const stream=await navigator.mediaDevices.getUserMedia({audio:true});chunks=[];const m=bestMime();recorder=m?new MediaRecorder(stream,{mimeType:m}):new MediaRecorder(stream);recorder.ondataavailable=e=>e.data.size&&chunks.push(e.data);recorder.onstop=()=>{blob=new Blob(chunks,{type:recorder.mimeType||'audio/webm'});$('preview').src=URL.createObjectURL(blob);$('preview').style.display='block';$('submit').style.display='block';$('rec').textContent='🎤 重新錄音 / Record Again';clearInterval(tick);stream.getTracks().forEach(t=>t.stop())};recorder.start(250);start=Date.now();$('rec').textContent='⏹ 停止 / Stop';tick=setInterval(()=>$('timer').textContent=Math.floor((Date.now()-start)/1000)+' sec',500)}catch(e){$('submitStatus').textContent='❌ '+e.message}}
+function to64(b){return new Promise((res,rej)=>{const r=new FileReader;r.onload=()=>res(String(r.result).split(',')[1]);r.onerror=rej;r.readAsDataURL(b)})}
+function postConfirmed(data,status){return new Promise(async(resolve,reject)=>{try{const nonce='n'+Date.now()+Math.random().toString(36).slice(2);data.nonce=nonce;const f=document.createElement('iframe');f.name='p_'+nonce;f.style.display='none';document.body.appendChild(f);const form=document.createElement('form');form.method='POST';form.action=API_URL;form.target=f.name;form.style.display='none';Object.entries(data).forEach(([k,v])=>{const i=document.createElement('input');i.name=k;i.value=v??'';form.appendChild(i)});document.body.appendChild(form);form.submit();let tries=0;const poll=async()=>{tries++;try{const r=await jsonp({api:'confirm',nonce});if(r&&r.ok){form.remove();f.remove();resolve(r);return}}catch(e){}if(tries<45){status&&status('⏳ 上傳中… / Uploading…');setTimeout(poll,1000)}else{form.remove();f.remove();reject(Error('Upload confirmation timeout'))}};setTimeout(poll,1000)}catch(e){reject(e)}})}
+async function submitRec(id){const st=$('submitStatus'),bt=$('submit');try{if(!blob)throw Error('No recording');bt.disabled=true;st.textContent='⏳ 繳交中… / Submitting…';await postConfirmed({action:'submitRecording',assignmentId:id,classId:ME.classId,studentId:ME.id,studentName:ME.name,mimeType:blob.type,base64:await to64(blob)},x=>st.textContent=x);st.textContent='✅ 已繳交 / Submitted'}catch(e){st.textContent='❌ '+e.message}finally{bt.disabled=false}}
+init();
 </script></body></html>

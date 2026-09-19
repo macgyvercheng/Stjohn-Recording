@@ -25,9 +25,50 @@ function bestMime(){if(!window.MediaRecorder)return'';for(const m of['audio/mp4'
 function to64(blob){return new Promise((res,rej)=>{const r=new FileReader();r.onload=()=>res(String(r.result).split(',')[1]);r.onerror=rej;r.readAsDataURL(blob)})}
 
 let D={},recorder,chunks=[],blob,start,tick,duration=0;const say=x=>$('msg').textContent=x;
-(async()=>{if(API_URL.startsWith('PASTE_'))return say('請先設定 config.js');try{D=await jsonp({api:'bootstrap'});$('cls').innerHTML=D.classes.map(x=>`<option value="${x.id}">${x.name}</option>`).join('');$('cls').onchange=refresh;$('assignment').onchange=render;refresh();say('就緒 / Ready')}catch(e){say(e.message)}})();
+(async()=>{if(API_URL.startsWith('PASTE_'))return say('請先設定 config.js');try{D=await jsonp({api:'bootstrap'});$('cls').innerHTML=D.classes.map(x=>`<option value="${x.id}">${x.name}</option>`).join('');$('cls').onchange=refresh;$('student').onchange=render;$('assignment').onchange=render;refresh();say('就緒 / Ready')}catch(e){say(e.message)}})();
 function refresh(){const c=$('cls').value;$('student').innerHTML=D.students.filter(x=>x.classId===c).map(x=>`<option value="${x.id}">${x.name}</option>`).join('');$('assignment').innerHTML=D.assignments.filter(x=>x.classId===c&&x.published).map(x=>`<option value="${x.id}">${x.week} ${x.title}</option>`).join('');render()}
-async function render(){const id=$('assignment').value;if(!id){$('work').innerHTML='<div class=box>目前沒有已發布作業 / No published assignment.</div>';return}try{const d=await jsonp({api:'assignment',assignmentId:id}),a=d.assignment,imgs=d.media.filter(x=>x.type==='image').sort((a,b)=>a.sort-b),demo=d.media.filter(x=>x.type==='demo').slice(-1)[0];$('work').innerHTML=`<div class=box><h2>${a.title}</h2><div style="white-space:pre-line">${a.instructions}</div>${imgs.map(x=>`<img class=page src="${x.url}">`).join('')}${demo?`<h3>老師示範 / Teacher Demo</h3><audio controls src="${demo.url}"></audio>`:''}<h3>我的錄音 / My Recording</h3><button id=rec onclick=record()>🎤 開始錄音 / Start Recording</button><div id=timer class=muted></div><audio id=preview controls style="display:none"></audio><button id=redo class=sec style="display:none" onclick=record()>重新錄音 / Record Again</button><button id=submit style="display:none" onclick=submitR()>繳交 / Submit</button><div id=status></div></div>`}catch(e){say(e.message)}}
+async function mediaSrc(fileId){
+ const d=await jsonp({api:'media',fileId});
+ if(!d.ok)throw Error(d.error||'Media load failed');
+ return `data:${d.mimeType};base64,${d.base64}`;
+}
+async function render(){
+ const id=$('assignment').value;
+ if(!id){$('work').innerHTML='<div class=box>目前沒有已發布作業 / No published assignment.</div>';return}
+ try{
+  const d=await jsonp({api:'assignment',assignmentId:id}),a=d.assignment,
+        imgs=d.media.filter(x=>x.type==='image').sort((a,b)=>a.sort-b),
+        demo=d.media.filter(x=>x.type==='demo').slice(-1)[0];
+  $('work').innerHTML=`<div id=feedbackArea></div><div class=box><h2>${a.title}</h2>
+   <div style="white-space:pre-line">${a.instructions}</div>
+   <div id=mediaArea>${imgs.length?'<div class=muted>教材圖片載入中… / Loading images…</div>':''}</div>
+   ${demo?`<h3>老師示範 / Teacher Demo</h3><div id=demoArea class=muted>示範錄音載入中… / Loading demo…</div>`:''}
+   <h3>我的錄音 / My Recording</h3>
+   <button id=rec onclick=record()>🎤 開始錄音 / Start Recording</button>
+   <div id=timer class=muted></div><audio id=preview controls style="display:none"></audio>
+   <button id=redo class=sec style="display:none" onclick=record()>重新錄音 / Record Again</button>
+   <button id=submit style="display:none" onclick=submitR()>繳交 / Submit</button><div id=status></div></div>`;
+  try{
+    const fb=await jsonp({api:'studentFeedback',studentId:$('student').value,assignmentId:id});
+    if(fb.feedback){
+      const f=fb.feedback;
+      $('feedbackArea').innerHTML=`<div class=box><h3>📝 上次老師的評語 / Previous Teacher Feedback</h3>
+      <b>${f.week?f.week+' · ':''}${f.assignmentTitle||'Previous Assignment'}</b>
+      <div style="white-space:pre-line;margin-top:8px">${f.comment}</div>
+      <div class=muted style="margin-top:8px">${f.status||''}${f.reviewedAt?' · '+f.reviewedAt:''}</div></div>`;
+    }
+  }catch(e){}
+  const ma=$('mediaArea'); if(ma)ma.innerHTML='';
+  for(const x of imgs){
+    try{const src=await mediaSrc(x.fileId);const im=document.createElement('img');im.className='page';im.src=src;ma.appendChild(im)}
+    catch(e){const p=document.createElement('div');p.textContent='❌ 圖片載入失敗 / Image failed';ma.appendChild(p)}
+  }
+  if(demo){
+    try{const src=await mediaSrc(demo.fileId);$('demoArea').innerHTML='';const au=document.createElement('audio');au.controls=true;au.src=src;$('demoArea').appendChild(au)}
+    catch(e){$('demoArea').textContent='❌ 示範錄音載入失敗 / Demo failed'}
+  }
+ }catch(e){say('❌ '+e.message)}
+}
 async function record(){if(recorder&&recorder.state==='recording'){recorder.stop();return}try{const stream=await navigator.mediaDevices.getUserMedia({audio:true});chunks=[];const m=bestMime();recorder=m?new MediaRecorder(stream,{mimeType:m}):new MediaRecorder(stream);recorder.ondataavailable=e=>e.data.size&&chunks.push(e.data);recorder.onstop=()=>{duration=Math.max(1,Math.round((Date.now()-start)/1000));blob=new Blob(chunks,{type:recorder.mimeType||'audio/webm'});$('preview').src=URL.createObjectURL(blob);$('preview').style.display='block';$('redo').style.display='block';$('submit').style.display='block';$('rec').textContent='🎤 再錄一次 / Record Again';clearInterval(tick);stream.getTracks().forEach(t=>t.stop())};recorder.start(250);start=Date.now();$('rec').textContent='⏹ 停止 / Stop';tick=setInterval(()=>$('timer').textContent=Math.floor((Date.now()-start)/1000)+' sec',500)}catch(e){$('status').textContent='❌ Microphone: '+e.message}}
-async function submitR(){try{if(!blob)throw Error('No recording');$('submit').disabled=true;await postConfirmed({action:'submitRecording',assignmentId:$('assignment').value,studentId:$('student').value,mimeType:blob.type,durationSec:duration,base64:await to64(blob)},x=>$('status').textContent=x);$('submit').textContent='✅ 已繳交 / Submitted';$('status').textContent='作業已成功繳交 / Submission confirmed'}catch(e){$('submit').disabled=false;$('status').textContent='❌ '+e.message}}
+async function submitR(){try{if(!blob)throw Error('No recording');const b=$('submit');b.disabled=true;b.textContent='⏳ 繳交中… / Submitting…';$('status').textContent='';await postConfirmed({action:'submitRecording',assignmentId:$('assignment').value,studentId:$('student').value,mimeType:blob.type,durationSec:duration,base64:await to64(blob)},x=>$('status').textContent=x);b.textContent='✅ 已繳交 / Submitted';$('status').textContent='✅ 作業已成功繳交 / Submission confirmed'}catch(e){$('submit').disabled=false;$('submit').textContent='繳交 / Submit';$('status').textContent='❌ '+e.message}}
 </script></body></html>
